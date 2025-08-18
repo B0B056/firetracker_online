@@ -378,7 +378,7 @@ def pagina_simulador():
     
     if not dados_utilizador.get("data_nascimento"):
         st.warning("⚠️ Antes de continuar, introduza a sua data de nascimento.")
-        nova_data = st.date_input("📅 Data de Nascimento", value=date(1990, 1, 1))
+        nova_data = st.date_input("📅 Data de Nascimento", value=date(1990, 1, 1), min_value=date(1900, 1, 1), max_value=date.today())
         if st.button("💾 Guardar Data"):
             dados_utilizador["data_nascimento"] = nova_data.strftime("%Y-%m-%d")
             guardar_dados_utilizador(dados_utilizador)
