@@ -460,7 +460,8 @@ def pagina_simulador():
     # Se não houver data de nascimento, pedir primeiro
     if not dados_utilizador.get("data_nascimento"):
         st.warning("⚠️ Antes de continuar, introduza a sua data de nascimento.")
-        nova_data = st.date_input("📅 Data de Nascimento", value=date(1990, 1, 1), min_value=date(1900, 1, 1), max_value=date.today())
+        nova_data = st.date_input("📅 Data de Nascimento", value=date(1990, 1, 1),
+                                  min_value=date(1900, 1, 1), max_value=date.today())
         if st.button("💾 Guardar Data"):
             dados_utilizador["data_nascimento"] = nova_data.strftime("%Y-%m-%d")
             guardar_dados_utilizador(dados_utilizador)
@@ -473,18 +474,54 @@ def pagina_simulador():
         except Exception:
             idade_atual = 0
 
+    # -------------------------------------------------
+    # Carregar valores padrão da última simulação (se existir)
+    # -------------------------------------------------
+    defaults = {
+        "idade_atual": idade_atual,
+        "idade_reforma": max(idade_atual + 1, 65),
+        "valor_atual": 0.0,
+        "reforco_mensal": 500.0,
+        "despesas": 24000.0,
+        "retorno": 5.0,
+        "inflacao": 2.0,
+        "swr": 4.0,
+    }
+
+    if SIMULACOES_CSV.exists():
+        df_sim = pd.read_csv(SIMULACOES_CSV)
+        if not df_sim.empty:
+            ultima = df_sim.iloc[-1]
+            defaults.update({
+                "idade_atual": int(ultima.get("Idade Atual", idade_atual)),
+                "idade_reforma": int(ultima.get("Idade Reforma", max(idade_atual + 1, 65))),
+                "valor_atual": float(ultima.get("Valor do Portefólio (€)", 0.0)),
+                "reforco_mensal": float(ultima.get("Reforço Mensal (€)", 500.0)),
+                "despesas": float(ultima.get("Despesas (€)", 24000.0)),
+                "retorno": float(ultima.get("Retorno (%)", 5.0)),
+                "inflacao": float(ultima.get("Inflação (%)", 2.0)),
+                "swr": float(ultima.get("SWR (%)", 4.0)),
+            })
+
     # ---- Inputs ----
     col1, col2 = st.columns(2)
     with col1:
-        st.number_input("👤 Idade Atual", min_value=0, max_value=120, value=idade_atual, key="idade_atual_input")
-        valor_atual = st.number_input("💰 Valor Atual do Portefólio (€)", min_value=0.0, value=0.0, step=100.0)
-        reforco_mensal = st.number_input("📆 Reforço Mensal (€)", min_value=0.0, value=500.0, step=50.0)
-        despesas = st.number_input("💸 Despesas Anuais (€)", min_value=0.0, value=24000.0, step=500.0)
+        st.number_input("👤 Idade Atual", min_value=0, max_value=120,
+                        value=int(defaults["idade_atual"]), key="idade_atual_input")
+        valor_atual = st.number_input("💰 Valor Atual do Portefólio (€)",
+                                      min_value=0.0, value=defaults["valor_atual"], step=100.0)
+        reforco_mensal = st.number_input("📆 Reforço Mensal (€)",
+                                         min_value=0.0, value=defaults["reforco_mensal"], step=50.0)
+        despesas = st.number_input("💸 Despesas Anuais (€)",
+                                   min_value=0.0, value=defaults["despesas"], step=500.0)
     with col2:
-        idade_reforma = st.number_input("📅 Idade de Reforma", min_value=idade_atual, max_value=120, value=max(idade_atual+1, 65))
-        retorno = st.number_input("📈 Retorno Esperado (%)", min_value=0.0, value=5.0, step=0.1)
-        inflacao = st.number_input("📉 Inflação (%)", min_value=0.0, value=2.0, step=0.1)
-        swr = st.number_input("🎯 SWR (%)", min_value=1.0, value=4.0, step=0.1)
+        idade_reforma = st.number_input("📅 Idade de Reforma", min_value=idade_atual, max_value=120,
+                                        value=int(defaults["idade_reforma"]))
+        retorno = st.number_input("📈 Retorno Esperado (%)", min_value=0.0,
+                                  value=defaults["retorno"], step=0.1)
+        inflacao = st.number_input("📉 Inflação (%)", min_value=0.0,
+                                   value=defaults["inflacao"], step=0.1)
+        swr = st.number_input("🎯 SWR (%)", min_value=1.0, value=defaults["swr"], step=0.1)
 
     guardar_no_historico = st.checkbox("💾 Guardar esta simulação no histórico?")
 
@@ -525,6 +562,7 @@ def pagina_simulador():
             # Mostrar tabela resumo
             st.subheader("📋 Resumo da Simulação")
             st.json(resultado["sim_data"])
+
 
 
 
