@@ -18,6 +18,89 @@ st.set_page_config(page_title="🔥 FIRE Tracker", layout="wide")
 DATA_DIR = Path(__file__).parent / "data"
 utilizador_path = DATA_DIR / "utilizador.json"
 
+def calcular_fire(despesas_anuais, swr):
+    """Calcula o valor necessário para independência financeira (FIRE)."""
+    return despesas_anuais / swr
+
+def calcular_coast_fire(despesas_anuais, swr, taxa_ajustada, anos_ate_reforma):
+    """Calcula o valor necessário hoje (Coast FIRE)."""
+    fire = calcular_fire(despesas_anuais, swr)
+    return fire / ((1 + taxa_ajustada) ** anos_ate_reforma)
+
+def processar_simulacao(entradas: dict, guardar: bool = False):
+    try:
+        dados_utilizador = carregar_dados_utilizador()
+        if dados_utilizador.get("data_nascimento"):
+            data_nasc = datetime.strptime(dados_utilizador["data_nascimento"], "%Y-%m-%d").date()
+            hoje = date.today()
+            idade_atual = hoje.year - data_nasc.year - ((hoje.month, hoje.day) < (data_nasc.month, data_nasc.day))
+        else:
+            idade_atual = int(entradas["idade_atual"])
+
+        idade_reforma = int(entradas["idade_reforma"])
+        swr = float(entradas["swr"].replace(",", ".")) / 100
+        despesas = float(entradas["despesas"].replace(",", "."))
+        investido = float(entradas["investido"].replace(",", "."))
+        retorno = float(entradas["retorno"].replace(",", ".")) / 100
+        inflacao = float(entradas["inflacao"].replace(",", ".")) / 100
+        valor_portefolio = float(entradas.get("valor_portefolio", "0").replace(",", "."))
+        reforco_mensal = float(entradas.get("reforco_mensal", "0").replace(",", "."))
+
+        taxa_ajustada = retorno - inflacao
+        anos_ate_reforma = idade_reforma - idade_atual
+
+        fire = calcular_fire(despesas, swr)
+        coast = calcular_coast_fire(despesas, swr, taxa_ajustada, anos_ate_reforma)
+
+        # --- Projeção ---
+        valores_proj = []
+        total = investido
+        for ano in range(anos_ate_reforma + 1):
+            total *= (1 + taxa_ajustada)
+            for m in range(12):
+                total += reforco_mensal * ((1 + taxa_ajustada) ** ((11 - m) / 12))
+            valores_proj.append(total)
+
+        atingiu_fire = any(v >= fire for v in valores_proj)
+
+        sim_data = {
+            "Data": datetime.now().strftime("%Y-%m-%d"),
+            "Idade Atual": idade_atual,
+            "Idade Reforma": idade_reforma,
+            "SWR (%)": swr * 100,
+            "Despesas (€)": despesas,
+            "Investido (€)": investido,
+            "Retorno (%)": retorno * 100,
+            "Inflação (%)": inflacao * 100,
+            "Valor do Portefólio (€)": valor_portefolio,
+            "Reforço Mensal (€)": reforco_mensal,
+            "FIRE (€)": fire,
+            "Coast FIRE (€)": coast
+        }
+
+        # Guardar no CSV
+        if guardar:
+            if SIMULACOES_CSV.exists():
+                df = pd.read_csv(SIMULACOES_CSV)
+                hoje = datetime.now().strftime("%Y-%m-%d")
+                if "Data" in df.columns:
+                    df = df[df["Data"] != hoje]
+                df = pd.concat([df, pd.DataFrame([sim_data])], ignore_index=True)
+            else:
+                df = pd.DataFrame([sim_data])
+            df.to_csv(SIMULACOES_CSV, index=False)
+
+        return {
+            "fire": fire,
+            "coast": coast,
+            "projecao": valores_proj,
+            "atingiu_fire": atingiu_fire,
+            "sim_data": sim_data
+        }, None
+
+    except Exception as e:
+        return None, str(e)
+
 def calcular_simulacao_fire(valor_atual, reforco_mensal, taxa_juros_anual, objetivo, idade_atual, idade_reforma):
     meses_ate_reforma = max(0, (idade_reforma - idade_atual) * 12)
     valores_fire = []
@@ -375,7 +458,6 @@ def pagina_simulador():
     dados_utilizador = carregar_dados_utilizador()
 
     # Se não houver data de nascimento, pedir primeiro
-    
     if not dados_utilizador.get("data_nascimento"):
         st.warning("⚠️ Antes de continuar, introduza a sua data de nascimento.")
         nova_data = st.date_input("📅 Data de Nascimento", value=date(1990, 1, 1), min_value=date(1900, 1, 1), max_value=date.today())
@@ -386,67 +468,64 @@ def pagina_simulador():
             st.rerun()
         return
     else:
-        # Converter string para date antes de usar novamente
         try:
-            data_nasc = datetime.strptime(dados_utilizador["data_nascimento"], "%Y-%m-%d").date()
             idade_atual = calcular_idade(dados_utilizador.get("data_nascimento")) or 0
-        except ValueError:
-            data_nasc = date(1990, 1, 1)  # valor padrão se algo correr mal
-            idade_atual = 0
         except Exception:
-            data_nasc = date(1990, 1, 1)
             idade_atual = 0
+
     # ---- Inputs ----
     col1, col2 = st.columns(2)
     with col1:
         st.number_input("👤 Idade Atual", min_value=0, max_value=120, value=idade_atual, key="idade_atual_input")
         valor_atual = st.number_input("💰 Valor Atual do Portefólio (€)", min_value=0.0, value=0.0, step=100.0)
         reforco_mensal = st.number_input("📆 Reforço Mensal (€)", min_value=0.0, value=500.0, step=50.0)
+        despesas = st.number_input("💸 Despesas Anuais (€)", min_value=0.0, value=24000.0, step=500.0)
     with col2:
         idade_reforma = st.number_input("📅 Idade de Reforma", min_value=idade_atual, max_value=120, value=max(idade_atual+1, 65))
-        taxa_juros = st.number_input("📈 Taxa de Crescimento Anual (%)", min_value=0.0, value=5.0, step=0.1) / 100.0
-        objetivo = st.number_input("🎯 Objetivo FIRE (€)", min_value=0.0, value=500000.0, step=1000.0)
+        retorno = st.number_input("📈 Retorno Esperado (%)", min_value=0.0, value=5.0, step=0.1)
+        inflacao = st.number_input("📉 Inflação (%)", min_value=0.0, value=2.0, step=0.1)
+        swr = st.number_input("🎯 SWR (%)", min_value=1.0, value=4.0, step=0.1)
 
     guardar_no_historico = st.checkbox("💾 Guardar esta simulação no histórico?")
 
     st.markdown("---")
 
     if st.button("Calcular Simulação"):
-        # Chamar a tua função já existente
-        anos, valores, _ = calcular_simulacao_fire(valor_atual, reforco_mensal, taxa_juros, objetivo, idade_atual, idade_reforma)
+        entradas = {
+            "idade_atual": st.session_state["idade_atual_input"],
+            "idade_reforma": idade_reforma,
+            "swr": str(swr),
+            "despesas": str(despesas),
+            "investido": str(valor_atual),
+            "retorno": str(retorno),
+            "inflacao": str(inflacao),
+            "valor_portefolio": str(valor_atual),
+            "reforco_mensal": str(reforco_mensal),
+        }
 
-        st.success(f"⏳ Vais atingir o FIRE em aproximadamente **{anos:.1f} anos**.")
+        resultado, erro = processar_simulacao(entradas, guardar=guardar_no_historico)
 
-        fig_fire = px.line(
-            x=list(range(len(valores))),
-            y=valores,
-            title="🔥 Projeção FIRE",
-            labels={"x": "Meses", "y": "Valor (€)"}
-        )
-        st.plotly_chart(fig_fire, use_container_width=True)
+        if erro:
+            st.error(f"Erro: {erro}")
+        else:
+            st.success(
+                f"🔥 FIRE necessário: {resultado['fire']:,.2f} €\n\n"
+                f"🏖️ Coast FIRE: {resultado['coast']:,.2f} €"
+            )
 
-        if guardar_no_historico:
-            nova_sim = pd.DataFrame([{
-                "Data": datetime.now().strftime("%Y-%m-%d"),
-                "Idade Atual": idade_atual,
-                "Idade Reforma": idade_reforma,
-                "Valor Portefólio (€)": valor_atual,
-                "Reforço Mensal (€)": reforco_mensal,
-                "Taxa (%)": taxa_juros * 100.0,
-                "FIRE (€)": objetivo
-            }])
+            # Gráfico de projeção
+            fig_fire = px.line(
+                x=list(range(len(resultado["projecao"]))),
+                y=resultado["projecao"],
+                title="🔥 Projeção FIRE",
+                labels={"x": "Anos", "y": "Valor (€)"}
+            )
+            st.plotly_chart(fig_fire, use_container_width=True)
 
-            if SIMULACOES_CSV.exists():
-                df_sim = pd.read_csv(SIMULACOES_CSV)
-                hoje = datetime.now().strftime("%Y-%m-%d")
-                if "Data" in df_sim.columns:
-                    df_sim = df_sim[df_sim["Data"] != hoje]
-                df_sim = pd.concat([df_sim, nova_sim], ignore_index=True)
-            else:
-                df_sim = nova_sim
+            # Mostrar tabela resumo
+            st.subheader("📋 Resumo da Simulação")
+            st.json(resultado["sim_data"])
 
-            df_sim.to_csv(SIMULACOES_CSV, index=False)
-            st.success("✅ Simulação guardada no histórico.")
 
 
 def pagina_cores_tema():
