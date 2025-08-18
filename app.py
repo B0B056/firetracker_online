@@ -487,7 +487,7 @@ def pagina_simulador():
         "inflacao": 2.0,
         "swr": 4.0,
     }
-
+# 1️⃣ Se existir simulacoes.csv -> usar últimos parâmetros
     if SIMULACOES_CSV.exists():
         df_sim = pd.read_csv(SIMULACOES_CSV)
         if not df_sim.empty:
@@ -502,6 +502,15 @@ def pagina_simulador():
                 "inflacao": float(ultima.get("Inflação (%)", 2.0)),
                 "swr": float(ultima.get("SWR (%)", 4.0)),
             })
+        # 2️⃣ Se existir reforcos.csv -> usar o "Valor do Portefólio (€)" da data mais recente
+    if REFORCOS_CSV.exists():
+        df_ref = pd.read_csv(REFORCOS_CSV)
+        if not df_ref.empty and "Valor do Portefólio (€)" in df_ref.columns and "Data" in df_ref.columns:
+            df_ref["Data"] = pd.to_datetime(df_ref["Data"], errors="coerce")
+            df_ref = df_ref.dropna(subset=["Data"]).sort_values("Data")
+            if not df_ref.empty:
+                ultimo_valor = df_ref.iloc[-1]["Valor do Portefólio (€)"]
+                defaults["valor_atual"] = float(ultimo_valor) 
 
     # ---- Inputs ----
     col1, col2 = st.columns(2)
