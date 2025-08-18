@@ -554,11 +554,6 @@ def pagina_simulador():
         if erro:
             st.error(f"Erro: {erro}")
         else:
-            st.success(
-                f"🔥 FIRE necessário: {resultado['fire']:,.2f} €\n\n"
-                f"🏖️ Coast FIRE: {resultado['coast']:,.2f} €"
-            )
-
             # Gráfico de projeção
             fig_fire = px.line(
                 x=list(range(len(resultado["projecao"]))),
@@ -566,11 +561,66 @@ def pagina_simulador():
                 title="🔥 Projeção FIRE",
                 labels={"x": "Anos", "y": "Valor (€)"}
             )
-            st.plotly_chart(fig_fire, use_container_width=True)
+            
 
-            # Mostrar tabela resumo
+            # --------------------
+            # 📋 Mostrar resumo
+            # --------------------
             st.subheader("📋 Resumo da Simulação")
-            st.json(resultado["sim_data"])
+
+            col1, col2, col3 = st.columns(3)
+            col1.metric("🔥 FIRE Necessário", f"{resultado['fire']:,.0f} €")
+            col2.metric("🏖️ Coast FIRE", f"{resultado['coast']:,.0f} €")
+            col3.metric("📅 Idade Reforma", f"{resultado['sim_data']['Idade Reforma']} anos")
+
+            st.markdown("---")
+
+            # Verificar se atinge FIRE
+            if resultado["atingiu_fire"]:
+                st.success(f"✅ Vais atingir o FIRE antes ou aos {resultado['sim_data']['Idade Reforma']} anos! 🚀")
+            else:
+                st.error(f"⚠️ Não vais atingir o FIRE até aos {resultado['sim_data']['Idade Reforma']} anos.")
+
+            # Idade aproximada de Coast FIRE
+            try:
+                anos_ate_coast = next(i for i, v in enumerate(resultado["projecao"]) if v >= resultado["coast"])
+                idade_coast = resultado["sim_data"]["Idade Atual"] + anos_ate_coast
+                st.info(f"🏝️ Vais atingir o Coast FIRE por volta dos **{idade_coast} anos**.")
+            except StopIteration:
+                st.warning("❌ Não atinges o Coast FIRE na simulação atual.")
+
+            # Dicas automáticas se não atinge FIRE
+            if not resultado["atingiu_fire"]:
+                sugestoes = []
+                if resultado["sim_data"]["Reforço Mensal (€)"] < 200:
+                    sugestoes.append("💡 Aumenta o reforço mensal.")
+                if resultado["sim_data"]["Idade Reforma"] - resultado["sim_data"]["Idade Atual"] < 10:
+                    sugestoes.append("⏳ Considera adiar a idade de reforma.")
+                if resultado["sim_data"]["Retorno (%)"] < 6:
+                    sugestoes.append("📈 Reavalia a taxa de retorno esperada (está baixa).")
+
+                if sugestoes:
+                    st.markdown("### 🔧 Dicas para melhorar:")
+                    for s in sugestoes:
+                        st.markdown(f"- {s}")
+
+            # --------------------
+            # 📊 Barra de Progresso FIRE
+            # --------------------
+            percent = (resultado["sim_data"]["Valor do Portefólio (€)"] / resultado["fire"]) if resultado["fire"] > 0 else 0
+            percent = max(0, min(1, percent))  # limitar entre 0% e 100%
+
+            st.markdown("### 🚀 Progresso até FIRE")
+            st.progress(percent)
+
+            st.write(f"Atualmente atingiste **{percent*100:.1f}%** do teu objetivo FIRE.")
+            percent_coast = (resultado["sim_data"]["Valor do Portefólio (€)"] / resultado["coast"]) if resultado["coast"] > 0 else 0
+            percent_coast = max(0, min(1, percent_coast))
+            st.markdown("**🏖️ Coast FIRE**")
+            st.progress(percent_coast)
+            st.write(f"Atingiste **{percent_coast*100:.1f}%** do teu objetivo Coast FIRE.")
+
+            st.plotly_chart(fig_fire, use_container_width=True)
 
 
 
