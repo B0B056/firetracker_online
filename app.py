@@ -1,9 +1,12 @@
+from curses import raw
 import streamlit as st
 import pandas as pd
 import json
 from pathlib import Path
 import plotly.express as px
 from datetime import date, datetime
+import re
+import unicodedata
 
 
 # Caminhos dos ficheiros
@@ -31,7 +34,7 @@ def processar_simulacao(entradas: dict, guardar: bool = False):
     try:
         dados_utilizador = carregar_dados_utilizador()
         if dados_utilizador.get("data_nascimento"):
-            data_nasc = datetime.strptime(dados_utilizador["data_nascimento"], "%Y-%m-%d").date()
+            data_nasc = datetime.strptime(dados_utilizador["data_nascimento"], "%Y-%m-%d").date() # erro esta assegurado
             hoje = date.today()
             idade_atual = hoje.year - data_nasc.year - ((hoje.month, hoje.day) < (data_nasc.month, data_nasc.day))
         else:
@@ -149,7 +152,9 @@ def carregar_json(nome_ficheiro):
 def carregar_cores_csv():
     """Lê o ficheiro cores_ativos.csv e devolve um dicionário {Ativo: cor}"""
     if CORES_ATIVOS_CSV.exists():
+
         df = pd.read_csv(CORES_ATIVOS_CSV)
+        
         return dict(zip(df["Ativo"], df["Cor"]))
     return {}
 def _to_number(series: pd.Series) -> pd.Series:
@@ -266,7 +271,8 @@ def pagina_dashboard():
             y="Quantidade",
             color="Ativo",
             title="📦 Quantidade/Mês por Ativo",
-            labels={"AnoMes": "Mês", "Quantidade": "Quantidade Total"}
+            labels={"AnoMes": "Mês", "Quantidade": "Quantidade Total"},
+            color_discrete_map=cores_ativos
         )
         st.plotly_chart(fig_qtd, use_container_width=True)
         
@@ -515,7 +521,7 @@ def pagina_simulador():
         nova_data = st.date_input("📅 Data de Nascimento", value=date(1990, 1, 1),
                                   min_value=date(1900, 1, 1), max_value=date.today())
         if st.button("💾 Guardar Data"):
-            dados_utilizador["data_nascimento"] = nova_data.strftime("%Y-%m-%d")
+            dados_utilizador["data_nascimento"] = nova_data.strftime("%Y-%m-%d")# erro esta assegurado
             guardar_dados_utilizador(dados_utilizador)
             st.success("✅ Data de nascimento guardada. Pode agora utilizar o simulador.")
             st.rerun()
@@ -674,9 +680,88 @@ def pagina_simulador():
 
             st.plotly_chart(fig_fire, use_container_width=True)
 
-def defenicoes():
-    st.title("Defenições")
-    st.dataframe(cores_ativos)
+def pagina_cores():
+    import re
+    import unicodedata
+    st.title("🎨 Cores e Tema")
+
+    if not CORES_ATIVOS_CSV.exists():
+        st.warning("⚠️ Ainda não existe o ficheiro cores_ativos.csv.")
+        return
+
+    # Ler CSV em modo seguro (remove BOM se existir)
+    try:
+        df = pd.read_csv(CORES_ATIVOS_CSV, dtype=str, keep_default_na=False, encoding="utf-8-sig")
+    except Exception as e:
+        st.error(f"❌ Erro ao ler ficheiro: {e}")
+        return
+
+    df.columns = df.columns.str.strip()
+
+    # Validar colunas
+    if "Ativo" not in df.columns or "Cor" not in df.columns:
+        st.error("❌ O ficheiro precisa das colunas 'Ativo' e 'Cor'.")
+        st.write("Colunas encontradas:", df.columns.tolist())
+        return
+
+    # Limpeza dos dados
+    df = df[["Ativo", "Cor"]].copy()
+    df["Ativo"] = df["Ativo"].astype(str).str.strip()
+    df["Cor"] = df["Cor"].astype(str).str.strip()
+    df["Cor"] = df["Cor"].str.extract(r"(#[0-9A-Fa-f]{6})", expand=False).fillna("#000000")
+
+    # Remover linhas inválidas
+    df = df[df["Ativo"] != ""]
+    df = df.drop_duplicates(subset=["Ativo"], keep="first").reset_index(drop=True)
+
+    st.info("🖌️ Clique numa cor para alterar. Só fica guardado após **💾 Guardar Alterações**.")
+
+    novas_cores = {}
+    cols = st.columns(2)
+
+    # Função auxiliar para keys seguras
+    key_pattern = re.compile(r"[^0-9A-Za-z_]+")
+    def make_safe_key(nome: str, idx: int) -> str:
+        nome_ascii = unicodedata.normalize("NFKD", str(nome)).encode("ascii", "ignore").decode("ascii")
+        return f"color_{key_pattern.sub('_', nome_ascii)}_{idx}"
+
+    # Loop dos ativos (enumerate → idx é int)
+    for idx, row in enumerate(df.itertuples(index=False)):
+        cor_val = str(row.Cor)
+        safe_key = make_safe_key(str(row.Ativo), idx)
+
+        col = cols[idx % 2]
+        with col:
+            st.markdown(f"**{row.Ativo}**")
+            cor_escolhida = st.color_picker("", cor_val, key=safe_key)
+            novas_cores[row.Ativo] = cor_escolhida
+            st.divider()
+
+    # Botões
+    c1, c2 = st.columns(2)
+
+    with c1:
+        if st.button("💾 Guardar Alterações", use_container_width=True):
+            saida = pd.DataFrame([{"Ativo": a, "Cor": c} for a, c in novas_cores.items()])
+            saida.to_csv(CORES_ATIVOS_CSV, index=False, encoding="utf-8-sig")
+            st.success("✅ Cores guardadas com sucesso!")
+            st.rerun()
+
+    with c2:
+        if st.button("🔄 Repor Padrão", use_container_width=True):
+            cores_padrao = pd.DataFrame([
+                {"Ativo": "Criptomoedas", "Cor": "#af7aa1"},
+                {"Ativo": "Fundos",        "Cor": "#e15759"},
+                {"Ativo": "Imobiliário",   "Cor": "#59a14f"},
+                {"Ativo": "Outros",        "Cor": "#bab0ab"},
+                {"Ativo": "Poupança",      "Cor": "#000000"},
+                {"Ativo": "QVDE",          "Cor": "#0c91e2"},
+                {"Ativo": "S&P 500",       "Cor": "#e80003"},
+            ])
+            cores_padrao.to_csv(CORES_ATIVOS_CSV, index=False, encoding="utf-8-sig")
+            st.success("✅ Cores repostas para os valores padrão.")
+            st.rerun()
+
 
 # ---- Barra lateral ----
 st.sidebar.title("🔥 FIRE Tracker")
@@ -694,5 +779,5 @@ elif menu == "✏️ Editar Mês":
     pagina_editar_mes()
 elif menu == "🧮 Simulador FIRE":
     pagina_simulador()
-elif menu == "Defenições":
-    defenicoes()
+elif menu == "🎨 Cores e Tema":
+    pagina_cores()
