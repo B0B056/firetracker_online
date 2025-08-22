@@ -269,7 +269,7 @@ def pagina_dashboard():
             labels={"AnoMes": "Mês", "Quantidade": "Quantidade Total"}
         )
         st.plotly_chart(fig_qtd, use_container_width=True)
-
+        
 def carregar_ativos_existentes():
     """Lê os ativos únicos do CSV de reforços."""
     if REFORCOS_CSV.exists():
@@ -321,7 +321,6 @@ def pagina_adicionar_reforco():
         with col1:
             data = st.date_input("📅 Data", value=date.today())
 
-            # Selectbox com estado guardado
             escolha_ativo = st.selectbox(
                 "🏷️ Ativo",
                 opcoes_ativos,
@@ -331,7 +330,6 @@ def pagina_adicionar_reforco():
                 key="escolha_ativo"
             )
 
-            # Se criar novo ativo, mostrar campo de texto
             if escolha_ativo == "➕ Criar novo ativo":
                 ativo = st.text_input("Novo ativo", key="novo_ativo").strip()
             else:
@@ -350,7 +348,38 @@ def pagina_adicionar_reforco():
             if ativo == "":
                 st.error("⚠️ O nome do ativo é obrigatório.")
             else:
-                guardar_reforco(data, ativo, quantidade, valor, rentabilidade, valor_portfolio)
+                # --- Guardar reforço e recalcular acumulado ---
+                novo = pd.DataFrame([{
+                    "Data": data.strftime("%Y-%m-%d"),
+                    "Ativo": ativo,
+                    "Quantidade": quantidade,
+                    "Valor Investido (€)": valor,
+                    "Rentabilidade (%)": rentabilidade,
+                    "Valor do Portefólio (€)": valor_portfolio
+                }])
+
+                if REFORCOS_CSV.exists():
+                    df = pd.read_csv(REFORCOS_CSV)
+                    df = pd.concat([df, novo], ignore_index=True)
+                else:
+                    df = novo
+
+                # Normalizar datas e ordenar
+                df["Data"] = pd.to_datetime(df["Data"], errors="coerce")
+                df = df.sort_values("Data").reset_index(drop=True)
+
+                # Recalcular Total_Acumulado
+                df["Total_Acumulado"] = pd.to_numeric(df["Valor Investido (€)"], errors="coerce").fillna(0).cumsum()
+
+                # Voltar a formatar datas
+                df["Data"] = df["Data"].dt.strftime("%Y-%m-%d")
+
+                # 🔹 Remover AnoMes se existir
+                if "AnoMes" in df.columns:
+                    df = df.drop(columns=["AnoMes"])
+
+                df.to_csv(REFORCOS_CSV, index=False)
+
                 st.success(f"Reforço em '{ativo}' guardado com sucesso!")
                 st.rerun()
 
@@ -362,95 +391,118 @@ def pagina_adicionar_reforco():
     else:
         st.info("Ainda não existem reforços registados.")
 
+
 def pagina_editar_mes():
     st.title("✏️ Editar Mês")
 
     colunas_obrigatorias = [
-        "Data", "Ativo", "Quantidade", "Valor Investido (€)", "Rentabilidade (%)", "Valor do Portefólio (€)"
+        "Data", "Ativo", "Quantidade", "Valor Investido (€)", 
+        "Rentabilidade (%)", "Valor do Portefólio (€)"
     ]
 
-    if REFORCOS_CSV.exists():
-        df = pd.read_csv(REFORCOS_CSV)
-
-        # Garantir colunas obrigatórias
-        for col in colunas_obrigatorias:
-            if col not in df.columns:
-                df[col] = None
-
-        # Adicionar coluna para selecionar linhas a apagar
-        if "Apagar" not in df.columns:
-            df["Apagar"] = False
-
-        # Formatar e ordenar dados
-        df["Data"] = pd.to_datetime(df["Data"], errors="coerce").dt.strftime("%Y-%m-%d")
-        for col in ["Quantidade", "Valor Investido (€)", "Rentabilidade (%)", "Valor do Portefólio (€)"]:
-            df[col] = pd.to_numeric(df[col], errors="coerce").round(2)
-        df.sort_values("Data", ascending=False, inplace=True)
-
-        # Filtro rápido por Ativo
-        ativos_unicos = ["Todos"] + sorted(df["Ativo"].dropna().unique())
-        filtro_ativo = st.selectbox("🔍 Filtrar por Ativo", ativos_unicos)
-        if filtro_ativo != "Todos":
-            df = df[df["Ativo"] == filtro_ativo]
-
-        st.info("🖊️ Altere os valores diretamente na tabela ou marque linhas para apagar.")
-
-        # Configuração das colunas
-        column_config = {
-            "Rentabilidade (%)": st.column_config.ProgressColumn(
-                "Rentabilidade (%)",
-                help="Percentagem de rentabilidade",
-                min_value=-100,
-                max_value=100,
-                format="%.2f"
-            ),
-            "Quantidade": st.column_config.NumberColumn("Quantidade", format="%.2f"),
-            "Valor Investido (€)": st.column_config.NumberColumn("Valor Investido (€)", format="%.2f"),
-            "Valor do Portefólio (€)": st.column_config.NumberColumn("Valor do Portefólio (€)", format="%.2f"),
-            "Apagar": st.column_config.CheckboxColumn("Apagar"),
-        }
-
-        # Editor
-        edited_df = st.data_editor(
-            df,
-            num_rows="dynamic",
-            hide_index=True,
-            column_config=column_config,
-            use_container_width=True
-        )
-
-        col1, col2 = st.columns(2)
-
-        # Guardar edições
-        with col1:
-            if st.button("💾 Guardar Alterações"):
-                df_editado = edited_df.copy()
-                if "Apagar" in df_editado.columns:
-                    df_editado = df_editado.drop(columns=["Apagar"])
-                df_editado["Data"] = pd.to_datetime(df_editado["Data"], errors="coerce").fillna(pd.Timestamp.today())
-                df_editado.sort_values("Data", ascending=False, inplace=True)
-                df_editado.to_csv(REFORCOS_CSV, index=False)
-                st.success("✅ Alterações guardadas com sucesso!")
-                st.rerun()
-
-        # Apagar linhas selecionadas
-        with col2:
-            if st.button("🗑️ Apagar Linhas Selecionadas"):
-                linhas_apagar = edited_df[edited_df["Apagar"] == True]
-                if not linhas_apagar.empty:
-                    df_restante = edited_df[edited_df["Apagar"] != True]
-                    if "Apagar" in df_restante.columns:
-                        df_restante = df_restante.drop(columns=["Apagar"])
-                    df_restante["Data"] = pd.to_datetime(df_restante["Data"], errors="coerce").fillna(pd.Timestamp.today())
-                    df_restante.sort_values("Data", ascending=False, inplace=True)
-                    df_restante.to_csv(REFORCOS_CSV, index=False)
-                    st.success(f"🗑️ {len(linhas_apagar)} linha(s) apagada(s) com sucesso!")
-                    st.rerun()
-                else:
-                    st.warning("⚠️ Nenhuma linha foi selecionada para apagar.")
-
-    else:
+    if not REFORCOS_CSV.exists():
         st.warning("⚠️ Ainda não existem reforços registados.")
+        return
+
+    df = pd.read_csv(REFORCOS_CSV)
+
+    # Garantir colunas obrigatórias
+    for col in colunas_obrigatorias:
+        if col not in df.columns:
+            df[col] = None
+
+    # Adicionar coluna Apagar se não existir
+    if "Apagar" not in df.columns:
+        df["Apagar"] = False
+
+    # Converter tipos
+    df["Data"] = pd.to_datetime(df["Data"], errors="coerce")
+    for col in ["Quantidade", "Valor Investido (€)", "Rentabilidade (%)", "Valor do Portefólio (€)"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce").round(2)
+
+    # Ordenar cronologicamente para calcular acumulado
+    df = df.sort_values("Data").reset_index(drop=True)
+
+    # Recalcular acumulado
+    df["Total_Acumulado"] = df["Valor Investido (€)"].cumsum()
+
+    # Ordenar para visualização
+    df = df.sort_values("Data", ascending=False).reset_index(drop=True)
+    df["Data"] = df["Data"].dt.strftime("%Y-%m-%d")
+
+    # Filtro rápido por ativo
+    ativos_unicos = ["Todos"] + sorted(df["Ativo"].dropna().unique())
+    filtro_ativo = st.selectbox("🔍 Filtrar por Ativo", ativos_unicos)
+    if filtro_ativo != "Todos":
+        df = df[df["Ativo"] == filtro_ativo]
+
+    st.info("🖊️ Altere os valores diretamente na tabela ou marque linhas para apagar.")
+
+    # Configuração das colunas
+    column_config = {
+        "Rentabilidade (%)": st.column_config.ProgressColumn(
+            "Rentabilidade (%)", help="Percentagem de rentabilidade", 
+            min_value=-100, max_value=100, format="%.2f"
+        ),
+        "Quantidade": st.column_config.NumberColumn("Quantidade", format="%.2f"),
+        "Valor Investido (€)": st.column_config.NumberColumn("Valor Investido (€)", format="%.2f"),
+        "Valor do Portefólio (€)": st.column_config.NumberColumn("Valor do Portefólio (€)", format="%.2f"),
+        "Apagar": st.column_config.CheckboxColumn("Apagar"),
+        "Total_Acumulado": st.column_config.NumberColumn("Total Acumulado (€)", format="%.2f", disabled=True),
+    }
+
+    edited_df = st.data_editor(
+        df,
+        num_rows="dynamic",
+        hide_index=True,
+        column_config=column_config,
+        use_container_width=True
+    )
+
+    col1, col2 = st.columns(2)
+
+    # Guardar edições
+    with col1:
+        if st.button("💾 Guardar Alterações"):
+            df_editado = edited_df.copy()
+            if "Apagar" in df_editado.columns:
+                df_editado = df_editado.drop(columns=["Apagar"])
+
+            # Recalcular antes de gravar
+            df_editado["Data"] = pd.to_datetime(df_editado["Data"], errors="coerce").fillna(pd.Timestamp.today())
+            df_editado = df_editado.sort_values("Data").reset_index(drop=True)
+            df_editado["Total_Acumulado"] = pd.to_numeric(df_editado["Valor Investido (€)"], errors="coerce").fillna(0).cumsum()
+            df_editado["Data"] = df_editado["Data"].dt.strftime("%Y-%m-%d")
+
+            # 🔹 Remover AnoMes se existir
+            if "AnoMes" in df_editado.columns:
+                df_editado = df_editado.drop(columns=["AnoMes"])
+
+            df_editado.to_csv(REFORCOS_CSV, index=False)
+            st.success("✅ Alterações guardadas com sucesso!")
+            st.rerun()
+
+    # Apagar linhas selecionadas
+    with col2:
+        if st.button("🗑️ Apagar Linhas Selecionadas"):
+            linhas_apagar = edited_df[edited_df["Apagar"] == True]
+            if not linhas_apagar.empty:
+                df_restante = edited_df[edited_df["Apagar"] != True].drop(columns=["Apagar"])
+                df_restante["Data"] = pd.to_datetime(df_restante["Data"], errors="coerce").fillna(pd.Timestamp.today())
+                df_restante = df_restante.sort_values("Data").reset_index(drop=True)
+                df_restante["Total_Acumulado"] = pd.to_numeric(df_restante["Valor Investido (€)"], errors="coerce").fillna(0).cumsum()
+                df_restante["Data"] = df_restante["Data"].dt.strftime("%Y-%m-%d")
+
+                # 🔹 Remover AnoMes se existir
+                if "AnoMes" in df_restante.columns:
+                    df_restante = df_restante.drop(columns=["AnoMes"])
+
+                df_restante.to_csv(REFORCOS_CSV, index=False)
+                st.success(f"🗑️ {len(linhas_apagar)} linha(s) apagada(s) com sucesso!")
+                st.rerun()
+            else:
+                st.warning("⚠️ Nenhuma linha foi selecionada para apagar.")
+
 
 def pagina_simulador():
     st.title("🧮 Simulador FIRE")
@@ -622,11 +674,8 @@ def pagina_simulador():
 
             st.plotly_chart(fig_fire, use_container_width=True)
 
-
-
-
-def pagina_cores_tema():
-    st.title("🎨 Cores e Tema")
+def defenicoes():
+    st.title("Defenições")
     st.dataframe(cores_ativos)
 
 # ---- Barra lateral ----
@@ -645,5 +694,5 @@ elif menu == "✏️ Editar Mês":
     pagina_editar_mes()
 elif menu == "🧮 Simulador FIRE":
     pagina_simulador()
-elif menu == "🎨 Cores e Tema":
-    pagina_cores_tema()
+elif menu == "Defenições":
+    defenicoes()
