@@ -1,4 +1,4 @@
-from curses import raw
+
 import streamlit as st
 import pandas as pd
 import json
@@ -7,19 +7,44 @@ import plotly.express as px
 from datetime import date, datetime
 import re
 import unicodedata
+import streamlit_authenticator as stauth
 
 
-# Caminhos dos ficheiros
-REFORCOS_CSV = Path("data/reforcos.csv")
-SIMULACOES_CSV = Path("data/simulacoes.csv")
-CORES_ATIVOS_CSV = Path("data/cores_ativos.csv")
-
-# Configuração da página
-st.set_page_config(page_title="🔥 FIRE Tracker", layout="wide")
-
-# Caminhos para as pastas 
 DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# --- Credenciais (coloca aqui os hashes gerados com bcrypt) ---
+credentials = {
+    "usernames": {
+        "roberto": {
+            "name": "Roberto Sampaio",
+            "password": "$2b$12$P8dm2tMmcPchZYFNLDExqeXbUp2LyZ7mIZZ9Kti5jJ4NHCF/cNMSe"
+        },
+        "maria": {
+            "name": "Maria Silva",
+            "password": "COLOCA_AQUI_HASH_DA_PASSWORD_DA_MARIA"
+        }
+    }
+}
+
+COOKIE_NAME = "fire_tracker_cookie"
+COOKIE_KEY = "abcdef"   # ⚠️ muda isto para uma chave secreta forte
+COOKIE_DAYS = 30
+
+authenticator = stauth.Authenticate(
+    credentials,
+    COOKIE_NAME,
+    COOKIE_KEY,
+    cookie_expiry_days=COOKIE_DAYS
+)
+# Caminhos default (serão reatribuídos para cada utilizador após login)
+REFORCOS_CSV = DATA_DIR / "reforcos.csv"
+SIMULACOES_CSV = DATA_DIR / "simulacoes.csv"
+CORES_ATIVOS_CSV = DATA_DIR / "cores_ativos.csv"
 utilizador_path = DATA_DIR / "utilizador.json"
+
+
+
 
 def calcular_fire(despesas_anuais, swr):
     """Calcula o valor necessário para independência financeira (FIRE)."""
@@ -285,6 +310,21 @@ def calcular_resumo_fire_dashboard():
 
     except Exception as e:
         return None, f"Erro ao avaliar progresso: {e}"
+def _init_user_files():
+    """Cria ficheiros iniciais para o utilizador se ainda não existirem."""
+    import pandas as pd
+    if not REFORCOS_CSV.exists():
+        pd.DataFrame(columns=["Data","Ativo","Quantidade","Valor Investido (€)","Rentabilidade (%)","Valor do Portefólio (€)"]).to_csv(REFORCOS_CSV, index=False)
+    if not SIMULACOES_CSV.exists():
+        pd.DataFrame(columns=[
+            "Data","Idade Atual","Idade Reforma","Despesas (€)","SWR (%)","Retorno (%)","Inflação (%)",
+            "Reforço Mensal (€)","Valor do Portefólio (€)","FIRE (€)","Coast FIRE (€)"
+        ]).to_csv(SIMULACOES_CSV, index=False)
+    if not CORES_ATIVOS_CSV.exists():
+        pd.DataFrame(columns=["Ativo","Cor"]).to_csv(CORES_ATIVOS_CSV, index=False)
+    if not utilizador_path.exists():
+        utilizador_path.write_text('{"data_nascimento": ""}', encoding="utf-8")
+
 
 # ---- Funções das páginas ----
 def pagina_dashboard():
@@ -493,7 +533,6 @@ def pagina_adicionar_reforco():
     else:
         st.info("Ainda não existem reforços registados.")
 
-
 def pagina_editar_mes():
     st.title("✏️ Editar Mês")
 
@@ -605,7 +644,6 @@ def pagina_editar_mes():
                 st.rerun()
             else:
                 st.warning("⚠️ Nenhuma linha foi selecionada para apagar.")
-
 
 def pagina_simulador():
     st.title("🧮 Simulador FIRE")
@@ -812,6 +850,7 @@ def pagina_cores():
     df = df.drop_duplicates(subset=["Ativo"], keep="first").reset_index(drop=True)
 
     st.info("🖌️ Clique numa cor para alterar. Só fica guardado após **💾 Guardar Alterações**.")
+    st.info("🖌️ Clique em **🔄 Repor Padrão** se primeira Alteração")
 
     novas_cores = {}
     cols = st.columns(2)
@@ -860,21 +899,51 @@ def pagina_cores():
             st.rerun()
 
 
-# ---- Barra lateral ----
-st.sidebar.title("🔥 FIRE Tracker")
-menu = st.sidebar.radio(
-    "Navegação",
-    ["📊 Dashboard", "➕ Adicionar Reforço", "✏️ Editar Mês", "🧮 Simulador FIRE", "🎨 Cores e Tema"]
-)
+# Renderizar o formulário de login
+authenticator.login(location="main")
 
-# ---- Mostrar página selecionada ----
-if menu == "📊 Dashboard":
-    pagina_dashboard()
-elif menu == "➕ Adicionar Reforço":
-    pagina_adicionar_reforco()
-elif menu == "✏️ Editar Mês":
-    pagina_editar_mes()
-elif menu == "🧮 Simulador FIRE":
-    pagina_simulador()
-elif menu == "🎨 Cores e Tema":
-    pagina_cores()
+# Obter os valores a partir da session_state
+authentication_status = st.session_state.get("authentication_status", None)
+username = st.session_state.get("username", None)
+name = st.session_state.get("name", None)
+
+if authentication_status:
+    st.sidebar.success(f"Bem-vindo {name} 👋")
+
+    USER_DIR = DATA_DIR / username
+    USER_DIR.mkdir(parents=True, exist_ok=True)
+
+    REFORCOS_CSV = USER_DIR / "reforcos.csv"
+    SIMULACOES_CSV = USER_DIR / "simulacoes.csv"
+    CORES_ATIVOS_CSV = USER_DIR / "cores_ativos.csv"
+    utilizador_path = USER_DIR / "utilizador.json"
+
+    _init_user_files()
+      # ---- Barra lateral ----
+    menu = st.sidebar.radio(
+        "Navegação",
+        ["📊 Dashboard", "➕ Adicionar Reforço", "✏️ Editar Mês", "🧮 Simulador FIRE", "🎨 Cores e Tema"]
+    )
+
+    # ---- Mostrar página selecionada ----
+    if menu == "📊 Dashboard":
+        pagina_dashboard()
+    elif menu == "➕ Adicionar Reforço":
+        pagina_adicionar_reforco()
+    elif menu == "✏️ Editar Mês":
+        pagina_editar_mes()
+    elif menu == "🧮 Simulador FIRE":
+        pagina_simulador()
+    elif menu == "🎨 Cores e Tema":
+        pagina_cores()
+
+    authenticator.logout("Logout", "sidebar",)
+    
+
+elif authentication_status is False:
+    st.sidebar.error("❌ Username ou password incorretos")
+
+elif authentication_status is None:
+    st.sidebar.warning("Por favor, insira o login")
+
+  
