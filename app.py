@@ -200,6 +200,92 @@ def calcular_idade(yyyy_mm_dd_str):
     nasc = datetime.strptime(yyyy_mm_dd_str, "%Y-%m-%d").date()
     hoje = date.today()
     return hoje.year - nasc.year - ((hoje.month, hoje.day) < (nasc.month, nasc.day))
+def calcular_resumo_fire_dashboard():
+    """Avalia progresso FIRE com base na última simulação e nos reforços registados."""
+    if not SIMULACOES_CSV.exists():
+        return None, "⚠️ Nenhuma simulação FIRE encontrada."
+
+    try:
+        df = pd.read_csv(SIMULACOES_CSV)
+        if df.empty:
+            return None, "⚠️ Nenhuma simulação FIRE encontrada."
+
+        ultima = df.iloc[-1]
+
+        idade_atual = int(float(ultima.get("Idade Atual", 0)))
+        idade_objetivo = int(float(ultima.get("Idade Reforma", idade_atual)))
+        despesas_anuais = float(ultima.get("Despesas (€)", 0.0))
+        swr_percent = float(ultima.get("SWR (%)", 4.0))
+        retorno_percent = float(ultima.get("Retorno (%)", 5.0))
+        inflacao_percent = float(ultima.get("Inflação (%)", 2.0))
+        valor_portefolio = float(ultima.get("Valor do Portefólio (€)", 0.0))
+
+        # FIRE necessário
+        swr = swr_percent / 100.0
+        fire = despesas_anuais / swr if swr > 0 else float("inf")
+
+        # Taxa ajustada
+        retorno = retorno_percent / 100.0
+        inflacao = inflacao_percent / 100.0
+        taxa_ajustada = retorno - inflacao
+        taxa_mensal = taxa_ajustada / 12.0
+
+        # Tempo até objetivo
+        anos = max(0, idade_objetivo - idade_atual)
+        meses = anos * 12
+
+        # Prestação mensal teórica
+        fator = (1 + taxa_mensal) ** meses - 1 if meses > 0 else 0
+        if fator > 0 and taxa_mensal != 0:
+            pmt = fire * taxa_mensal / fator
+        else:
+            pmt = fire / meses if meses > 0 else fire
+
+        # Meses decorridos desde primeiro reforço
+        meses_passados = 0
+        if REFORCOS_CSV.exists():
+            dfr = pd.read_csv(REFORCOS_CSV)
+            if "Data" in dfr.columns and not dfr.empty:
+                dfr["Data"] = pd.to_datetime(dfr["Data"], errors="coerce")
+                if dfr["Data"].notna().any():
+                    data_primeira = dfr["Data"].min()
+                    hoje = pd.Timestamp.today()
+                    meses_passados = (hoje.year - data_primeira.year) * 12 + (hoje.month - data_primeira.month)
+
+        # Valor esperado hoje
+        if taxa_mensal != 0:
+            valor_esperado_hoje = pmt * (((1 + taxa_mensal) ** meses_passados - 1) / taxa_mensal)
+        else:
+            valor_esperado_hoje = pmt * meses_passados
+
+        diferenca = valor_portefolio - valor_esperado_hoje
+        percentagem = (valor_portefolio / fire) * 100 if fire > 0 else 0
+
+        if valor_esperado_hoje > 0:
+            if diferenca < -abs(valor_esperado_hoje) * 0.05:
+                estado = f"⏳ Atrasado face à projeção ({diferenca:,.2f} €)"
+            elif diferenca > abs(valor_esperado_hoje) * 0.05:
+                estado = f"🚀 Adiantado face à projeção (+{diferenca:,.2f} €)"
+            else:
+                estado = "✅ No caminho certo"
+        else:
+            estado = "ℹ️ Sem histórico suficiente para comparar"
+
+        resumo = (
+            f"-- FIRE necessário: {fire:,.2f} € aos {idade_objetivo} anos\n"
+            f"-- Tempo até FIRE: {anos} anos\n"
+            f"-- 💶 Necessário investir: {pmt:,.2f} €/mês com {taxa_ajustada*100:.2f}% real\n"
+            f"-- 📊 Valor esperado hoje: {valor_esperado_hoje:,.2f} €\n"
+            f"-- 💼 Portefólio atual: {valor_portefolio:,.2f} €\n"
+            f"-- 🔁 Progresso: {percentagem:.1f}% atingido\n"
+            f"-- Estado atual: {estado}"
+        )
+
+        return resumo, None
+
+    except Exception as e:
+        return None, f"Erro ao avaliar progresso: {e}"
+
 # ---- Funções das páginas ----
 def pagina_dashboard():
     st.title("📊 Dashboard")
@@ -221,6 +307,16 @@ def pagina_dashboard():
         st.warning("⚠️ Ficheiro de simulações não encontrado.")
 
     st.markdown("---")
+        # --------------------
+        # 2️⃣ Resumo Detalhado FIRE
+        # --------------------
+    resumo, erro = calcular_resumo_fire_dashboard()
+    if erro:
+        st.warning(erro)
+    elif resumo:
+        st.markdown("### 📋 Resumo Detalhado FIRE")
+        st.text(resumo)  # usa st.text para manter formatação com quebras de linha
+
 
     if not REFORCOS_CSV.exists():
         st.warning("⚠️ Ficheiro de reforços não encontrado.")
@@ -443,6 +539,7 @@ def pagina_editar_mes():
         df = df[df["Ativo"] == filtro_ativo]
 
     st.info("🖊️ Altere os valores diretamente na tabela ou marque linhas para apagar.")
+    st.info("🖊️ Altere uma linha de cada vez e guarde")
 
     # Configuração das colunas
     column_config = {
