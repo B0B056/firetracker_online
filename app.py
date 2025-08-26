@@ -254,7 +254,7 @@ def pagina_dashboard():
         df,
         x="Data",
         y=["Total_Acumulado", "Valor do Portefólio (€)"],
-        title="📈 Total Acumulado vs Valor do Portefólio",
+        title="📈 Progressão do portefolio",
         labels={"value": "Valor (€)", "variable": "Série"},
         hover_data={"Data": True, "value": ":,.2f"}
     )
