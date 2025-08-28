@@ -8,6 +8,7 @@ from datetime import date, datetime
 import re
 import unicodedata
 import streamlit_authenticator as stauth
+import random
 
 
 DATA_DIR = Path(__file__).parent / "data"
@@ -22,7 +23,7 @@ credentials = {
         },
         "maria": {
             "name": "Maria Silva",
-            "password": "COLOCA_AQUI_HASH_DA_PASSWORD_DA_MARIA"
+            "password": "$2b$12$9z2bQukPrVuh7uvGC92j4eftyuL.YT/omPWVEfJlBUTbGKxBZJNuq"
         }
     }
 }
@@ -175,13 +176,18 @@ def carregar_json(nome_ficheiro):
         st.warning(f"⚠️ Ficheiro {nome_ficheiro} não encontrado.")
         return {}
 def carregar_cores_csv():
-    """Lê o ficheiro cores_ativos.csv e devolve um dicionário {Ativo: cor}"""
-    if CORES_ATIVOS_CSV.exists():
+    """Lê o cores_ativos.csv e devolve {Ativo: cor} (limpo e sempre atualizado)."""
+    if not CORES_ATIVOS_CSV.exists():
+        return {}
+    df = pd.read_csv(CORES_ATIVOS_CSV, dtype=str, keep_default_na=False, encoding="utf-8-sig")
+    df.columns = df.columns.str.strip()
+    if "Ativo" not in df.columns or "Cor" not in df.columns:
+        return {}
+    df["Ativo"] = df["Ativo"].astype(str).str.strip()
+    # Mantém apenas cores hex válidas; preenche por defeito se estiver vazio
+    df["Cor"] = df["Cor"].astype(str).str.extract(r"(#[0-9A-Fa-f]{6})", expand=False).fillna("#000000")
+    return dict(zip(df["Ativo"], df["Cor"]))
 
-        df = pd.read_csv(CORES_ATIVOS_CSV)
-        
-        return dict(zip(df["Ativo"], df["Cor"]))
-    return {}
 def _to_number(series: pd.Series) -> pd.Series:
 
     """Tenta converter strings numéricas com formatos diversos para float."""
@@ -196,7 +202,7 @@ def _to_number(series: pd.Series) -> pd.Series:
     return pd.to_numeric(s, errors='coerce')
 # Carregar dados
 simulacoes = carregar_csv("simulacoes.csv")
-cores_ativos = carregar_cores_csv()
+
 utilizador = carregar_json("utilizador.json")
 def carregar_dados_utilizador():
     """Carrega o ficheiro de utilizador, cria se não existir."""
@@ -324,11 +330,25 @@ def _init_user_files():
         pd.DataFrame(columns=["Ativo","Cor"]).to_csv(CORES_ATIVOS_CSV, index=False)
     if not utilizador_path.exists():
         utilizador_path.write_text('{"data_nascimento": ""}', encoding="utf-8")
+def adicionar_ativo_a_cores(ativo):
+    """Adiciona um novo ativo ao cores_ativos.csv com cor aleatória se ainda não existir"""
+    if CORES_ATIVOS_CSV.exists():
+        df = pd.read_csv(CORES_ATIVOS_CSV)
+    else:
+        df = pd.DataFrame(columns=["Ativo", "Cor"])
 
+    if ativo not in df["Ativo"].values:
+        # gerar cor aleatória em formato hex
+        cor_nova = "#{:06x}".format(random.randint(0, 0xFFFFFF))
+        novo = pd.DataFrame([{"Ativo": ativo, "Cor": cor_nova}])
+        df = pd.concat([df, novo], ignore_index=True)
+        df.to_csv(CORES_ATIVOS_CSV, index=False, encoding="utf-8-sig")
+        st.info(f"🎨 Novo ativo '{ativo}' adicionado com a cor {cor_nova}")
 
 # ---- Funções das páginas ----
 def pagina_dashboard():
     st.title("📊 Dashboard")
+    cores_ativos = carregar_cores_csv()
 
     # --------------------
     # 1️⃣ Resumo FIRE
@@ -453,9 +473,16 @@ def pagina_adicionar_reforco():
             ativos_existentes = sorted(
                 [a for a in _df["Ativo"].dropna().unique().tolist() if str(a).strip() != ""]
             )
-
+    # Carregar cores de ativos predefinidos
+    core_ativos_defenidas = []
+    if CORES_ATIVOS_CSV.exists():
+        _df = pd.read_csv(CORES_ATIVOS_CSV)
+        if "Ativo" in _df.columns and not _df.empty:
+            core_ativos_defenidas = sorted(
+                [a for a in _df["Ativo"].dropna().unique().tolist() if str(a).strip() != ""]
+            )
     # Opções: criar novo ou escolher existente
-    opcoes_ativos = ["➕ Criar novo ativo"] + ativos_existentes
+    opcoes_ativos = ["➕ Criar novo ativo"] + ativos_existentes + core_ativos_defenidas 
 
     with st.form("form_reforco"):
         col1, col2 = st.columns(2)
@@ -523,6 +550,7 @@ def pagina_adicionar_reforco():
                 df.to_csv(REFORCOS_CSV, index=False)
 
                 st.success(f"Reforço em '{ativo}' guardado com sucesso!")
+                adicionar_ativo_a_cores(ativo)
                 st.rerun()
 
     # Mostrar reforços existentes
