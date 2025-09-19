@@ -11,6 +11,15 @@ import streamlit_authenticator as stauth
 import random
 import os
 
+def to_dict(obj):
+    """Converte st.secrets (Secrets) em dict normal, recursivamente."""
+    if isinstance(obj, dict):
+        return {k: to_dict(v) for k, v in obj.items()}
+    try:
+        # Secrets é MappingProxyType-like
+        return {k: to_dict(v) for k, v in obj.items()}
+    except Exception:
+        return obj
 
 DATA_DIR = Path(__file__).parent / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -32,17 +41,6 @@ REFORCOS_CSV = DATA_DIR / "reforcos.csv"
 SIMULACOES_CSV = DATA_DIR / "simulacoes.csv"
 CORES_ATIVOS_CSV = DATA_DIR / "cores_ativos.csv"
 utilizador_path = DATA_DIR / "utilizador.json"
-
-
-def to_dict(obj):
-    """Converte st.secrets (Secrets) em dict normal, recursivamente."""
-    if isinstance(obj, dict):
-        return {k: to_dict(v) for k, v in obj.items()}
-    try:
-        # Secrets é MappingProxyType-like
-        return {k: to_dict(v) for k, v in obj.items()}
-    except Exception:
-        return obj
 
 
 def calcular_fire(despesas_anuais, swr):
