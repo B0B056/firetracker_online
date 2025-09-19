@@ -16,7 +16,7 @@ DATA_DIR = Path(__file__).parent / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # --- 🔐 Credenciais e cookie (vêm dos Secrets no Streamlit Cloud) ---
-credentials = dict(st.secrets["credentials"])  # 🔄 converte para dict normal
+credentials = to_dict(st.secrets["credentials"])
 COOKIE_NAME = "fire_tracker_cookie"
 COOKIE_KEY = st.secrets["COOKIE_KEY"]  # definido em Settings → Secrets
 COOKIE_DAYS = 30
@@ -34,6 +34,15 @@ CORES_ATIVOS_CSV = DATA_DIR / "cores_ativos.csv"
 utilizador_path = DATA_DIR / "utilizador.json"
 
 
+def to_dict(obj):
+    """Converte st.secrets (Secrets) em dict normal, recursivamente."""
+    if isinstance(obj, dict):
+        return {k: to_dict(v) for k, v in obj.items()}
+    try:
+        # Secrets é MappingProxyType-like
+        return {k: to_dict(v) for k, v in obj.items()}
+    except Exception:
+        return obj
 
 
 def calcular_fire(despesas_anuais, swr):
