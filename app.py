@@ -16,7 +16,7 @@ DATA_DIR = Path(__file__).parent / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # --- 🔐 Credenciais e cookie (vêm dos Secrets no Streamlit Cloud) ---
-credentials = st.secrets["credentials"]
+credentials = dict(st.secrets["credentials"])  # 🔄 converte para dict normal
 COOKIE_NAME = "fire_tracker_cookie"
 COOKIE_KEY = st.secrets["COOKIE_KEY"]  # definido em Settings → Secrets
 COOKIE_DAYS = 30
