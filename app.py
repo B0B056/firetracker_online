@@ -9,27 +9,16 @@ import re
 import unicodedata
 import streamlit_authenticator as stauth
 import random
+import os
 
 
 DATA_DIR = Path(__file__).parent / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# --- Credenciais (coloca aqui os hashes gerados com bcrypt) ---
-credentials = {
-    "usernames": {
-        "roberto": {
-            "name": "Roberto Sampaio",
-            "password": "$2b$12$P8dm2tMmcPchZYFNLDExqeXbUp2LyZ7mIZZ9Kti5jJ4NHCF/cNMSe"
-        },
-        "maria": {
-            "name": "Maria Silva",
-            "password": "$2b$12$9z2bQukPrVuh7uvGC92j4eftyuL.YT/omPWVEfJlBUTbGKxBZJNuq"
-        }
-    }
-}
-
+# --- 🔐 Credenciais e cookie (vêm dos Secrets no Streamlit Cloud) ---
+credentials = st.secrets["credentials"]
 COOKIE_NAME = "fire_tracker_cookie"
-COOKIE_KEY = "abcdef"   # ⚠️ muda isto para uma chave secreta forte
+COOKIE_KEY = st.secrets["COOKIE_KEY"]  # definido em Settings → Secrets
 COOKIE_DAYS = 30
 
 authenticator = stauth.Authenticate(
